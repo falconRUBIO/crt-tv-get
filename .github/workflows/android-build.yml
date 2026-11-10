@@ -32,17 +32,17 @@ jobs:
           "$BT/apksigner" sign \
             --ks "$RUNNER_TEMP/crt-debug.p12" \
             --ks-pass pass:android --key-pass pass:android \
-            --out android/CRT-TV-0.7.apk \
+            --out android/CRT-TV-0.8.apk \
             android/app/build/outputs/apk/release/app-release-unsigned.apk
-          "$BT/apksigner" verify --print-certs android/CRT-TV-0.7.apk
-          sha256sum android/CRT-TV-0.7.apk
+          "$BT/apksigner" verify --print-certs android/CRT-TV-0.8.apk
+          sha256sum android/CRT-TV-0.8.apk
 
-      - name: Publish release v0.6
+      - name: Publish release v0.8
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          SHA=$(sha256sum android/CRT-TV-0.7.apk | cut -d' ' -f1)
-          gh release create v0.7 android/CRT-TV-0.7.apk \
+          SHA=$(sha256sum android/CRT-TV-0.8.apk | cut -d' ' -f1)
+          gh release create v0.8 android/CRT-TV-0.8.apk \
             --repo falconRUBIO/crt-tv-get \
-            --title "CRT TV 0.7 (Fire TV tester build)" \
-            --notes "Fire TV tester build 0.7. Adds TV light mode: animations/shadows off, offscreen guide rows skipped (content-visibility), preview-stall guard against guide lag, version in the on-screen status line. Earlier: native D-pad key pass-through (no bridge lag), proper fullscreen video surface, in-page video compositing fix for black-picture/audio-only playback, repaired hosted-update check, hourly self-update check with in-app install prompt (system installer). On-screen debug line shows video readyState/buffered/paused so a stuck \"Tuning...\" (loading/seek stall) can be told apart from a compositing black-screen. Signed with the committed throwaway debug key - UNINSTALL 0.5 BEFORE INSTALLING (signature changed). sha256: $SHA"
+            --title "CRT TV 0.8 (Fire TV tester build)" \
+            --notes "Fire TV tester build 0.8. Low-end stick hardening: guide preview decodes only while dwelling on a channel (navigation pauses it instantly so scrolling never competes with decode; a frozen preview clock is reloaded every 3s until it plays - the preview is never hidden), fullscreen exit resumes the WebView so the inline decoder re-composites, guide trimmed to a 6-hour window (~4x fewer program tiles), deferred + slower auto-open (what's-on opens after the first painted frame), warm-start JSON cache for the feed, WebView caches kept across launches, update checks deferred so nothing competes with startup, smaller preview box, no CSS filters in the guide. Earlier: TV light mode, native D-pad pass-through, fullscreen surface fix, in-app self-update. Debug status line stays hidden unless playback stalls; long-press Menu toggles it. Installs IN PLACE over 0.6/0.7 (same debug key). sha256: $SHA"
