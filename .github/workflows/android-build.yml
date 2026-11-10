@@ -1,0 +1,48 @@
+name: android-build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build unsigned release APK
+        working-directory: android
+        run: gradle --no-daemon assembleRelease
+
+      - name: Sign with committed debug key (deliberate throwaway test key)
+        run: |
+          base64 -d android/keystore.b64 > "$RUNNER_TEMP/crt-debug.p12"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" sign \
+            --ks "$RUNNER_TEMP/crt-debug.p12" \
+            --ks-pass pass:android --key-pass pass:android \
+            --out android/CRT-TV-0.6.apk \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$BT/apksigner" verify --print-certs android/CRT-TV-0.6.apk
+          sha256sum android/CRT-TV-0.6.apk
+
+      - name: Publish release v0.6
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA=$(sha256sum android/CRT-TV-0.6.apk | cut -d' ' -f1)
+          gh release create v0.6 android/CRT-TV-0.6.apk \
+            --repo falconRUBIO/crt-tv-get \
+            --title "CRT TV 0.6 (Fire TV tester build)" \
+            --notes "Fire TV tester build 0.6. Rebuilt wrapper: native D-pad key pass-through (no bridge lag), proper fullscreen video surface, in-page video compositing fix for black-picture/audio-only playback, repaired hosted-update check. On-screen debug line shows video readyState/buffered/paused so a stuck \"Tuning...\" (loading/seek stall) can be told apart from a compositing black-screen. Signed with the committed throwaway debug key - UNINSTALL 0.5 BEFORE INSTALLING (signature changed). sha256: $SHA"
