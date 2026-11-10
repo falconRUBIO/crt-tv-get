@@ -43,12 +43,19 @@ import java.io.InputStream;
  *    content-visibility on guide rows) plus a preview-stall guard.
  *  - Debug status line hidden by default: 3s at launch, auto-shows while
  *    stalled, toggles with long-press Menu (bridged as 'MenuLong').
+ *
+ * v0.8 changes over 0.7 (low-end Fire Stick hardening):
+ *  - WebView HTTP/database caches kept across launches (faster cold start).
+ *  - tv.js: deferred+ slower auto-open (first painted frame before what's-on),
+ *    guide preview decodes only while dwelling on a channel, preview freeze
+ *    detection via currentTime, warm-start JSON fetch cache, update checks
+ *    deferred 60-90s so nothing competes with startup.
  */
 public class MainActivity extends Activity {
     private static final String HOME_URL = "https://crt-tv-4ym.pages.dev/";
     private static final String UA = "Mozilla/5.0 (X11; Linux x86_64) "
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.0 "
-            + "Safari/537.36 CRTTV/0.7";
+            + "Safari/537.36 CRTTV/0.8";
 
     private WebView webView;
     private FrameLayout customContainer;
@@ -104,6 +111,10 @@ public class MainActivity extends Activity {
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+        // v0.8: keep HTTP/database caches across launches so a cold start
+        // reuses the cached bundle and feed instead of refetching ~2 MB.
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setUserAgentString(UA);
 
@@ -141,7 +152,7 @@ public class MainActivity extends Activity {
 
             @JavascriptInterface
             public String appVersion() {
-                return "0.7";
+                return "0.8";
             }
         }, "CrtNative");
 
@@ -166,6 +177,13 @@ public class MainActivity extends Activity {
         customView = null;
         if (customViewCallback != null) customViewCallback.onCustomViewHidden();
         customViewCallback = null;
+        // v0.8: returning from fullscreen tears down the custom surface; the
+        // Fire OS WebView can leave the inline decoder attached to it (guide
+        // preview plays ~30s then freezes). Resume and relayout the WebView
+        // so inline video re-composites; tv.js also re-loads a frozen
+        // preview once per channel dwell.
+        webView.onResume();
+        webView.requestLayout();
     }
 
     private void injectBridge() {
