@@ -32,17 +32,17 @@ jobs:
           "$BT/apksigner" sign \
             --ks "$RUNNER_TEMP/crt-debug.p12" \
             --ks-pass pass:android --key-pass pass:android \
-            --out android/CRT-TV-0.8.apk \
+            --out android/CRT-TV-0.9.apk \
             android/app/build/outputs/apk/release/app-release-unsigned.apk
-          "$BT/apksigner" verify --print-certs android/CRT-TV-0.8.apk
-          sha256sum android/CRT-TV-0.8.apk
+          "$BT/apksigner" verify --print-certs android/CRT-TV-0.9.apk
+          sha256sum android/CRT-TV-0.9.apk
 
-      - name: Publish release v0.8
+      - name: Publish release v0.9
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          SHA=$(sha256sum android/CRT-TV-0.8.apk | cut -d' ' -f1)
-          gh release create v0.8 android/CRT-TV-0.8.apk \
+          SHA=$(sha256sum android/CRT-TV-0.9.apk | cut -d' ' -f1)
+          gh release create v0.9 android/CRT-TV-0.9.apk \
             --repo falconRUBIO/crt-tv-get \
-            --title "CRT TV 0.8 (Fire TV tester build)" \
-            --notes "Fire TV tester build 0.8. Low-end stick hardening: guide preview decodes only while dwelling on a channel (navigation pauses it instantly so scrolling never competes with decode; a frozen preview clock is reloaded every 3s until it plays - the preview is never hidden), fullscreen exit resumes the WebView so the inline decoder re-composites, guide trimmed to a 6-hour window (~4x fewer program tiles), deferred + slower auto-open (what's-on opens after the first painted frame), warm-start JSON cache for the feed, WebView caches kept across launches, update checks deferred so nothing competes with startup, smaller preview box, no CSS filters in the guide. Earlier: TV light mode, native D-pad pass-through, fullscreen surface fix, in-app self-update. Debug status line stays hidden unless playback stalls; long-press Menu toggles it. Installs IN PLACE over 0.6/0.7 (same debug key). sha256: $SHA"
+            --title "CRT TV 0.9 (Fire TV tester build)" \
+            --notes "Fire TV tester build 0.9. Low-end stick hardening: the guide preview KEEPS PLAYING while navigating (its source switches only after a 1.2s dwell, so no decoder churn while scrolling; a frozen preview clock is reloaded every 3s until it plays), fullscreen exit resumes the WebView so the inline decoder re-composites, guide trimmed to a 6-hour window (~4x fewer program tiles), deferred + slower auto-open (what's-on opens after the first painted frame), warm-start JSON cache for the feed, WebView caches kept across launches, update checks deferred so nothing competes with startup, no CSS filters in the guide. Earlier: TV light mode, native D-pad pass-through, fullscreen surface fix, in-app self-update. Debug status line stays hidden unless playback stalls; long-press Menu toggles it. Installs IN PLACE over 0.6/0.7/0.8 (same debug key). sha256: $SHA"
