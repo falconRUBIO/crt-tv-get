@@ -1,7 +1,7 @@
 (function(){
  if(document.getElementById("crt-access-gate")||!document.getElementById("app"))return;
  if(window.crtTVInstalled)return;window.crtTVInstalled=true;
- window.crtTvVersion='0.8';
+ window.crtTvVersion='0.9';
  const style=document.createElement('style');style.textContent=`
  .desktop-player .preview-actions,#ctl-theater,#ctl-full{display:none!important}
  .desktop-player .osd-rows .tbtn:focus{outline:3px solid #f7e8cd;outline-offset:2px;background:#534b3b}
@@ -151,22 +151,31 @@
   };
  }catch(e){}
 
- // v0.8 preview policy (replaces the 0.7 stall guard): the guide preview
- // decodes ONLY while the user dwells on a channel (no D-pad input for
- // 1.2s). Any navigation pauses it instantly, so guide rendering never
- // competes with video decode. A dwelling preview whose clock stops
- // advancing >3s gets its source reloaded to re-acquire the decoder (the
- // leak after fullscreen exit), retried every 3s - the preview must keep
- // playing, it is never hidden (Falcon, phonemsg-01M722710XENGR69RBRWN7BNMF).
- let prevChan='',prevT=-1,prevAdvanceAt=0;
+ // v0.9 preview policy: the preview KEEPS PLAYING while the guide is
+ // navigated (Falcon, phonemsg-01M722D526D0XT5P3T9PTMPE7Y). The load win
+ // comes from NOT switching the preview source on every row: src changes
+ // are remembered but ignored while navigating, and applied only after a
+ // 1.2s dwell, so the decoder keeps its current channel during scrolling.
+ // A playing preview whose clock stops >3s is reloaded to re-acquire the
+ // decoder (the leak after fullscreen exit), retried every 3s - the
+ // preview is never paused for load reasons and never hidden.
+ let lastGoodSrc='',lastAttemptedSrc='';
+ const guardPreview=p=>{
+  if(p.__crtGuard)return;p.__crtGuard=true;
+  const d=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src');
+  try{Object.defineProperty(p,'src',{
+   configurable:true,
+   get(){return d.get.call(this)},
+   set(v){lastAttemptedSrc=v;if(Date.now()-lastInteraction>1200||!lastGoodSrc){lastGoodSrc=v;d.set.call(this,v)}}
+  })}catch(e){}
+ };
+ let prevT=-1,prevAdvanceAt=0;
  setInterval(function(){
   if(watching())return;
   const p=document.querySelector('#preview');
   if(!p)return;
-  const chan=p.dataset.channelId||'';
-  if(chan!==prevChan){prevChan=chan;prevT=-1;prevAdvanceAt=Date.now()}
-  const dwelling=Date.now()-lastInteraction>1200;
-  if(!dwelling){if(!p.paused)p.pause();return}
+  guardPreview(p);
+  if(lastAttemptedSrc&&lastAttemptedSrc!==lastGoodSrc&&Date.now()-lastInteraction>1200){p.src=lastAttemptedSrc}
   if(p.paused){p.play().catch(()=>{});prevAdvanceAt=Date.now();return}
   if(prevT<0||Math.abs(p.currentTime-prevT)>0.05){prevT=p.currentTime;prevAdvanceAt=Date.now()}
   else if(Date.now()-prevAdvanceAt>3000){try{p.load()}catch(e){}p.play().catch(()=>{});prevAdvanceAt=Date.now()}
@@ -194,7 +203,7 @@
  let lastSrc='',lastErrAt=0;
  setInterval(function(){
   let v=(!watching()&&document.querySelector('#preview'))||document.querySelector('#video')||document.querySelector('.hero-screen video')||document.querySelector('video');
-  if(!v){dbg.textContent='CRT 0.8 debug: no <video> element on page';dbg.style.display=(dbgPinned||Date.now()<dbgLaunchUntil)?'':'none';return}
+  if(!v){dbg.textContent='CRT 0.9 debug: no <video> element on page';dbg.style.display=(dbgPinned||Date.now()<dbgLaunchUntil)?'':'none';return}
   let err=v.error?(' err='+ (ERRN[v.error.code]||v.error.code)):'';
   if(err&&Date.now()-lastErrAt>1000){lastErrAt=Date.now();console.log('CRT-DEBUG media error',v.error.code,v.error.message||'')}
   let src=v.currentSrc||v.src||'';if(src!==lastSrc){lastSrc=src;console.log('CRT-DEBUG src',src)}
@@ -208,7 +217,7 @@
   dbg.style.display=vis?'':'none';
   if(!vis)return; // skip the text build while hidden: less main-thread work
   let buf='-';try{if(v.buffered.length)buf=v.buffered.end(v.buffered.length-1).toFixed(1)}catch(e){}
-  dbg.textContent='CRT 0.8 | rs='+v.readyState+' '+(RSN[v.readyState]||'')+' | ns='+v.networkState+' '+(NSN[v.networkState]||'')+
+  dbg.textContent='CRT 0.9 | rs='+v.readyState+' '+(RSN[v.readyState]||'')+' | ns='+v.networkState+' '+(NSN[v.networkState]||'')+
    ' | t='+v.currentTime.toFixed(1)+'/'+((v.duration&&isFinite(v.duration))?v.duration.toFixed(0):'?')+
    ' | buf='+buf+'s'+(v.paused?' | paused':' | playing')+' | key->paint '+keyPaintMs+'ms'+err;
  },500);
