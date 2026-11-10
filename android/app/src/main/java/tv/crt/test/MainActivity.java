@@ -50,12 +50,14 @@ import java.io.InputStream;
  *    guide preview decodes only while dwelling on a channel, preview freeze
  *    detection via currentTime, warm-start JSON fetch cache, update checks
  *    deferred 60-90s so nothing competes with startup.
+ *  - v0.9: guide preview KEEPS PLAYING during navigation; its source only
+ *    switches after a 1.2s dwell (no decoder churn while scrolling).
  */
 public class MainActivity extends Activity {
     private static final String HOME_URL = "https://crt-tv-4ym.pages.dev/";
     private static final String UA = "Mozilla/5.0 (X11; Linux x86_64) "
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.0 "
-            + "Safari/537.36 CRTTV/0.8";
+            + "Safari/537.36 CRTTV/0.9";
 
     private WebView webView;
     private FrameLayout customContainer;
@@ -152,7 +154,7 @@ public class MainActivity extends Activity {
 
             @JavascriptInterface
             public String appVersion() {
-                return "0.8";
+                return "0.9";
             }
         }, "CrtNative");
 
