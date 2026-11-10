@@ -5,7 +5,8 @@
  const style=document.createElement('style');style.textContent=`
  .desktop-player .preview-actions,#ctl-theater,#ctl-full{display:none!important}
  .desktop-player .osd-rows .tbtn:focus{outline:3px solid #f7e8cd;outline-offset:2px;background:#534b3b}
- .epg-row.focused .chan-cell{outline:2px solid #a2894e;outline-offset:-2px}
+ .epg-row.focused .chan-cell{outline:3px solid #f7e8cd!important;outline-offset:-2px;background:#534b3b!important}
+ .epg-row.focused{outline:2px solid #a2894e!important;outline-offset:-2px}
  /* Fire OS WebView: keep video composited in-page. Hardware overlay promotion
     on inline <video> inside clipped/rounded/overlayed containers is what
     renders black with playing audio. */
@@ -20,15 +21,37 @@
  const reveal=()=>key('Shift');
  function buttons(){return [...document.querySelectorAll('#player button')].filter(b=>!b.disabled&&b.getClientRects().length&&getComputedStyle(b).visibility!=='hidden')}
  let lastInteraction=Date.now();
+ let lastKeyAt=0,keyPaintMs=0;
 
  // D-pad keys now arrive as native TRUSTED keydown events straight from the
  // WebView: zero bridge latency, single handling point. Menus/guide pass
- // through to the site's own key handlers untouched. While the player is up,
- // manage OSD button focus here (trusted arrows only; synthetic keys from
- // crtRemote below keep reaching the site's handlers, e.g. rewind = seek).
+ // through to the site's own key handlers. While the player is up, manage
+ // OSD button focus here (trusted arrows only; synthetic keys from crtRemote
+ // below keep reaching the site's handlers, e.g. rewind = seek).
+ //
+ // Guide key coalescing (tester: presses queue up, then jump ~15s later):
+ // a long main-thread block makes every queued press land at once. During a
+ // busy window after a nav key, extra presses are absorbed and collapsed into
+ // at most ONE repeat of the latest direction once the thread settles.
+ const NAV={ArrowUp:1,ArrowDown:1,ArrowLeft:1,ArrowRight:1};
+ let busyUntil=0,pendingNav=null,pendingTimer=0;
+ function settle(){pendingTimer=0;if(pendingNav){const k2=pendingNav;pendingNav=null;key(k2)}}
  document.addEventListener('keydown',function(e){
-  lastInteraction=Date.now();
-  if(!watching())return;
+  lastInteraction=Date.now();lastKeyAt=performance.now();
+  requestAnimationFrame(function(){requestAnimationFrame(function(){keyPaintMs=Math.round(performance.now()-lastKeyAt)})});
+  if(!watching()){
+   if(NAV[e.key]&&e.isTrusted){
+    const now=Date.now();
+    if(now<busyUntil){
+     e.preventDefault();e.stopImmediatePropagation();
+     pendingNav=e.key;
+     if(!pendingTimer)pendingTimer=setTimeout(settle,Math.max(50,busyUntil-now));
+    }else{
+     busyUntil=now+400;
+    }
+   }
+   return;
+  }
   reveal();
   let bs=buttons(),at=bs.indexOf(document.activeElement);
   if(e.key==='Enter'){
@@ -58,6 +81,7 @@
  //    ("Tuning..." with no picture is this, NOT the compositing bug)
  //  - rs>=3, t advancing, black picture   -> compositing/overlay bug
  //  - err=...                             -> media decode/network error
+ //  - key->paint N ms                     -> main-thread congestion on keys
  const RSN=['HAVE_NOTHING','HAVE_METADATA','HAVE_CURRENT_DATA','HAVE_FUTURE_DATA','HAVE_ENOUGH_DATA'];
  const NSN=['EMPTY','IDLE','LOADING','NO_SOURCE'];
  const ERRN={1:'ABORTED',2:'NETWORK',3:'DECODE',4:'SRC_NOT_SUPPORTED'};
@@ -72,7 +96,7 @@
   let buf='-';try{if(v.buffered.length)buf=v.buffered.end(v.buffered.length-1).toFixed(1)}catch(e){}
   dbg.textContent='CRT 0.6 | rs='+v.readyState+' '+(RSN[v.readyState]||'')+' | ns='+v.networkState+' '+(NSN[v.networkState]||'')+
    ' | t='+v.currentTime.toFixed(1)+'/'+((v.duration&&isFinite(v.duration))?v.duration.toFixed(0):'?')+
-   ' | buf='+buf+'s'+(v.paused?' | paused':' | playing')+err;
+   ' | buf='+buf+'s'+(v.paused?' | paused':' | playing')+' | key->paint '+keyPaintMs+'ms'+err;
  },500);
 
  // Hosted updates, not APK self-installation. Public endpoints only, hourly.
