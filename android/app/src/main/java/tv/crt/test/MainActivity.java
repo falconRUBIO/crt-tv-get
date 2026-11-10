@@ -9,6 +9,8 @@ import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -35,6 +37,12 @@ import java.io.InputStream;
  *    playing audio).
  *  - tv.js adds a CSS override that keeps inline video composited in-page.
  *  - Hourly hosted-update check repointed at files that exist (bundle.js).
+ *
+ * v0.7 changes over 0.6:
+ *  - TV light mode in tv.js (no transitions/animations/shadows,
+ *    content-visibility on guide rows) plus a preview-stall guard.
+ *  - Debug status line hidden by default: 3s at launch, auto-shows while
+ *    stalled, toggles with long-press Menu (bridged as 'MenuLong').
  */
 public class MainActivity extends Activity {
     private static final String HOME_URL = "https://crt-tv-4ym.pages.dev/";
@@ -45,6 +53,17 @@ public class MainActivity extends Activity {
     private WebView webView;
     private FrameLayout customContainer;
     private View customView;
+
+    // Short Menu press bridges 'Menu' (site menus / sports jump); holding Menu
+    // for 600ms bridges 'MenuLong' (debug status-line toggle) and consumes
+    // the release so the short action never fires.
+    private static final long MENU_LONG_PRESS_MS = 600L;
+    private final Handler menuHandler = new Handler(Looper.getMainLooper());
+    private boolean menuLongFired;
+    private final Runnable menuLongRunnable = () -> {
+        menuLongFired = true;
+        bridge("window.crtRemote && window.crtRemote('MenuLong')");
+    };
     private WebChromeClient.CustomViewCallback customViewCallback;
     private WebChromeClient chromeClient;
     private long updateDownloadId = -1;
@@ -203,13 +222,26 @@ public class MainActivity extends Activity {
             return true;
         }
 
+        if (code == KeyEvent.KEYCODE_MENU) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                menuLongFired = false;
+                menuHandler.removeCallbacks(menuLongRunnable);
+                menuHandler.postDelayed(menuLongRunnable, MENU_LONG_PRESS_MS);
+            } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                menuHandler.removeCallbacks(menuLongRunnable);
+                if (!menuLongFired) {
+                    bridge("window.crtRemote && window.crtRemote('Menu')");
+                }
+            }
+            return true;
+        }
+
         if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
             String bridgeKey = null;
             switch (code) {
                 case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE: bridgeKey = "MediaPlayPause"; break;
                 case KeyEvent.KEYCODE_MEDIA_REWIND: bridgeKey = "MediaRewind"; break;
                 case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD: bridgeKey = "MediaFastForward"; break;
-                case KeyEvent.KEYCODE_MENU: bridgeKey = "Menu"; break;
                 default: break;
             }
             if (bridgeKey != null) {
