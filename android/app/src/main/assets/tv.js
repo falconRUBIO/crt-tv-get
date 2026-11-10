@@ -18,8 +18,10 @@
  *,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}
  .epg-row,.tile,.sports-row,.wo-card,.hero-screen,#player,.chan-cell{box-shadow:none!important;text-shadow:none!important;backdrop-filter:none!important}
  .epg-row{content-visibility:auto!important;contain-intrinsic-size:auto 112px!important}
- /* tester debug line: distinguishes loading/seek stalls from compositing bugs */
- #crt-debug-line{position:fixed;left:8px;bottom:8px;z-index:2147483647;background:rgba(0,0,0,.82);color:#9fe870;font:14px/1.35 monospace;padding:6px 10px;border-radius:4px;max-width:94vw;white-space:pre-wrap;pointer-events:none}
+ /* tester debug line: distinguishes loading/seek stalls from compositing
+    bugs. Kept inside the TV safe area (~4% overscan margin), wraps to two
+    lines when narrow, large enough to read at 10 feet, dark backing. */
+ #crt-debug-line{position:fixed;left:4vw;right:4vw;bottom:4vh;z-index:2147483647;background:rgba(0,0,0,.9);color:#9fe870;font:20px/1.4 monospace;padding:10px 14px;border-radius:6px;white-space:pre-wrap;overflow-wrap:break-word;pointer-events:none}
  `;document.head.appendChild(style);
  const watching=()=>document.querySelector('#player.on');
  const key=k=>document.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}));
@@ -74,6 +76,7 @@
 
  // Special remote keys bridged from MainActivity (media keys + Menu).
  window.crtRemote=function(k){lastInteraction=Date.now();
+  if(k==='MenuLong'){if(typeof dbgToggle==='function')dbgToggle();return}
   if(k==='MediaPlayPause'){if(watching())document.querySelector('#ctl-play').click();else document.querySelector('#hero-screen')?.click();return}
   if(k==='MediaRewind'||k==='MediaFastForward'){if(watching())key(k==='MediaRewind'?'ArrowLeft':'ArrowRight');return}
   if(k==='Menu'){
@@ -133,10 +136,18 @@
  const NSN=['EMPTY','IDLE','LOADING','NO_SOURCE'];
  const ERRN={1:'ABORTED',2:'NETWORK',3:'DECODE',4:'SRC_NOT_SUPPORTED'};
  const dbg=document.createElement('div');dbg.id='crt-debug-line';dbg.textContent='CRT 0.7 debug: waiting for video...';document.body.appendChild(dbg);
+ // Visibility: hidden by default (0.7). Shows for 3s at launch so the build
+ // version is confirmable, auto-shows only while playback is stalled
+ // (readyState<3 for >8s, or a media error) and for 5s after recovery, and
+ // toggles on demand with long-press Menu (bridged as 'MenuLong').
+ let dbgPinned=false,dbgStallAt=0,dbgLastBadAt=0;
+ const dbgLaunchUntil=Date.now()+3000;
+ function dbgToggle(){dbgPinned=!dbgPinned;dbg.style.display=dbgPinned?'':'none'}
+ dbg.style.display='';
  let lastSrc='',lastErrAt=0;
  setInterval(function(){
   let v=(!watching()&&document.querySelector('#preview'))||document.querySelector('#video')||document.querySelector('.hero-screen video')||document.querySelector('video');
-  if(!v){dbg.textContent='CRT 0.7 debug: no <video> element on page';return}
+  if(!v){dbg.textContent='CRT 0.7 debug: no <video> element on page';dbg.style.display=(dbgPinned||Date.now()<dbgLaunchUntil)?'':'none';return}
   let err=v.error?(' err='+ (ERRN[v.error.code]||v.error.code)):'';
   if(err&&Date.now()-lastErrAt>1000){lastErrAt=Date.now();console.log('CRT-DEBUG media error',v.error.code,v.error.message||'')}
   let src=v.currentSrc||v.src||'';if(src!==lastSrc){lastSrc=src;console.log('CRT-DEBUG src',src)}
@@ -144,6 +155,11 @@
   dbg.textContent='CRT 0.7 | rs='+v.readyState+' '+(RSN[v.readyState]||'')+' | ns='+v.networkState+' '+(NSN[v.networkState]||'')+
    ' | t='+v.currentTime.toFixed(1)+'/'+((v.duration&&isFinite(v.duration))?v.duration.toFixed(0):'?')+
    ' | buf='+buf+'s'+(v.paused?' | paused':' | playing')+' | key->paint '+keyPaintMs+'ms'+err;
+  const now=Date.now();
+  if(v.readyState<3){if(!dbgStallAt)dbgStallAt=now}else dbgStallAt=0;
+  const bad=!!err||(dbgStallAt&&now-dbgStallAt>8000);
+  if(bad)dbgLastBadAt=now;
+  dbg.style.display=(dbgPinned||now<dbgLaunchUntil||bad||now-dbgLastBadAt<5000)?'':'none';
  },500);
 
  // Hosted updates, not APK self-installation. Public endpoints only, hourly.
