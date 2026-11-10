@@ -18,11 +18,10 @@
  *,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}
  .epg-row,.tile,.sports-row,.wo-card,.hero-screen,#player,.chan-cell{box-shadow:none!important;text-shadow:none!important;backdrop-filter:none!important}
  .epg-row{content-visibility:auto!important;contain-intrinsic-size:auto 112px!important}
- /* v0.8 low-end hardening: no CSS filters in the guide, smaller guide
-    preview so its decode costs less, guide rows skip offscreen images. */
+ /* v0.8 low-end hardening: no CSS filters in the guide; guide rows skip
+    offscreen images. */
  .epg-row,.tile,.chan-cell{filter:none!important}
  .epg-row img{content-visibility:auto!important}
- #preview{max-width:320px!important;max-height:180px!important}
  /* tester debug line: distinguishes loading/seek stalls from compositing
     bugs. Kept inside the TV safe area (~4% overscan margin), wraps to two
     lines when narrow, large enough to read at 10 feet, dark backing. */
@@ -155,27 +154,22 @@
  // v0.8 preview policy (replaces the 0.7 stall guard): the guide preview
  // decodes ONLY while the user dwells on a channel (no D-pad input for
  // 1.2s). Any navigation pauses it instantly, so guide rendering never
- // competes with video decode - the "plays a few seconds then freezes"
- // symptom. A dwelling preview whose clock stops advancing >2.5s while
- // playing is paused and hidden until the next channel change (a full
- // readyState buffer can mask a starved decoder, so watch currentTime).
+ // competes with video decode. A dwelling preview whose clock stops
+ // advancing >3s gets its source reloaded to re-acquire the decoder (the
+ // leak after fullscreen exit), retried every 3s - the preview must keep
+ // playing, it is never hidden (Falcon, phonemsg-01M722710XENGR69RBRWN7BNMF).
  let prevChan='',prevT=-1,prevAdvanceAt=0;
  setInterval(function(){
   if(watching())return;
   const p=document.querySelector('#preview');
   if(!p)return;
   const chan=p.dataset.channelId||'';
-  if(chan!==prevChan){prevChan=chan;prevT=-1;prevAdvanceAt=Date.now();delete p.dataset.crtRetried;p.style.display=''}
+  if(chan!==prevChan){prevChan=chan;prevT=-1;prevAdvanceAt=Date.now()}
   const dwelling=Date.now()-lastInteraction>1200;
   if(!dwelling){if(!p.paused)p.pause();return}
   if(p.paused){p.play().catch(()=>{});prevAdvanceAt=Date.now();return}
   if(prevT<0||Math.abs(p.currentTime-prevT)>0.05){prevT=p.currentTime;prevAdvanceAt=Date.now()}
-  else if(Date.now()-prevAdvanceAt>2500){
-   // Frozen clock: one reload retry to re-acquire the decoder (the leak
-   // after fullscreen exit), then give up until the channel changes.
-   if(!p.dataset.crtRetried){p.dataset.crtRetried='1';try{p.load()}catch(e){}p.play().catch(()=>{});prevAdvanceAt=Date.now()}
-   else{p.pause();p.style.display='none'}
-  }
+  else if(Date.now()-prevAdvanceAt>3000){try{p.load()}catch(e){}p.play().catch(()=>{});prevAdvanceAt=Date.now()}
  },1000);
 
  // ---- tester debug overlay (0.7): one line, updates 2x/s ----------------
