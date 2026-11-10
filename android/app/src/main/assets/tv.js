@@ -1,7 +1,7 @@
 (function(){
  if(document.getElementById("crt-access-gate")||!document.getElementById("app"))return;
  if(window.crtTVInstalled)return;window.crtTVInstalled=true;
- window.crtTvVersion='0.7';
+ window.crtTvVersion='0.8';
  const style=document.createElement('style');style.textContent=`
  .desktop-player .preview-actions,#ctl-theater,#ctl-full{display:none!important}
  .desktop-player .osd-rows .tbtn:focus{outline:3px solid #f7e8cd;outline-offset:2px;background:#534b3b}
@@ -18,6 +18,11 @@
  *,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}
  .epg-row,.tile,.sports-row,.wo-card,.hero-screen,#player,.chan-cell{box-shadow:none!important;text-shadow:none!important;backdrop-filter:none!important}
  .epg-row{content-visibility:auto!important;contain-intrinsic-size:auto 112px!important}
+ /* v0.8 low-end hardening: no CSS filters in the guide, smaller guide
+    preview so its decode costs less, guide rows skip offscreen images. */
+ .epg-row,.tile,.chan-cell{filter:none!important}
+ .epg-row img{content-visibility:auto!important}
+ #preview{max-width:320px!important;max-height:180px!important}
  /* tester debug line: distinguishes loading/seek stalls from compositing
     bugs. Kept inside the TV safe area (~4% overscan margin), wraps to two
     lines when narrow, large enough to read at 10 feet, dark backing. */
@@ -97,32 +102,80 @@
 
  // Auto-open the TV-friendly mode on launch: start playback, then open the
  // what's-on channel browser (the path the tester found usable). Once per load.
+ // v0.8: defer auto-open until the first frame is painted, poll slower, and
+ // stop touching the page once open - the old 800ms click loop competed with
+ // the ~9k-node guide render and starved D-pad input on low-end sticks.
  let autoOpened=false;
  const autoOpen=setInterval(function(){
   if(autoOpened){clearInterval(autoOpen);return}
-  if(!document.querySelector('#app'))return;
+  if(document.readyState!=='complete'||!document.querySelector('#app'))return;
   if(!watching()){document.querySelector('#hero-screen')?.click();return}
+  const v=document.querySelector('#video')||document.querySelector('video');
+  if(!v||v.readyState<2)return; // wait for the first painted frame
   const wo=document.querySelector('#ctl-whatson');
   if(wo){autoOpened=true;clearInterval(autoOpen);wo.click()}
- },800);
- setTimeout(function(){clearInterval(autoOpen)},20000);
+ },1500);
+ setTimeout(function(){clearInterval(autoOpen)},45000);
 
- // Preview-stall guard: a stalled preview video pegs the Fire Stick main
- // thread (that is the guide lag). While browsing (not watching), if the
- // preview sits below HAVE_CURRENT_DATA for >8s, pause it; each channel
- // change gets a fresh 8s to prove it can play.
- let stallSince=0,stallChan='';
+ // v0.8: trim the guide to a 6-hour window in light mode (Falcon request:
+ // "guide window should be 6 hours instead of 24 on the stick"). 24h of
+ // program tiles is ~1.5k extra nodes; hiding everything starting beyond
+ // +6h cuts guide layout/paint cost hard. Re-applied on a timer because the
+ // site's window-advance re-renders rows. Program entry ids end in startMs.
+ const trimGuide=()=>{
+  const limit=Date.now()+6*3600*1000;
+  document.querySelectorAll('.epg-row .tile[id]').forEach(t=>{
+   const m=/-(\d{13})$/.exec(t.id);
+   if(!m)return;
+   const hide=(+m[1])>limit;
+   if(hide!==(t.style.display==='none'))t.style.display=hide?'none':'';
+  });
+ };
+ setTimeout(trimGuide,10000);setInterval(trimGuide,5000);
+
+ // v0.8: warm-start feed cache. JSON GETs (feed + data files) are served
+ // from localStorage when under 10 minutes old and revalidated in the
+ // background; cold launches stop waiting on the ~2 MB feed before first
+ // paint. Video bytes are never cached here.
+ try{
+  const realFetch=window.fetch.bind(window);
+  const cacheable=u=>{try{const x=new URL(u,location.href);return x.hostname==='gist.githubusercontent.com'||(x.origin===location.origin&&/\/data\/[^/]+\.json$/.test(x.pathname))}catch(e){return false}};
+  window.fetch=function(input,init){
+   const url=typeof input==='string'?input:(input&&input.url)||'';
+   const method=(init&&init.method)||(typeof input==='object'&&input&&input.method)||'GET';
+   if(method!=='GET'||!cacheable(url))return realFetch(input,init);
+   const key='crt-cache:'+url;
+   let hit=null;try{hit=JSON.parse(localStorage.getItem(key)||'null')}catch(e){}
+   const refresh=()=>realFetch(input,init).then(r=>{if(r.ok)r.clone().text().then(t=>{try{localStorage.setItem(key,JSON.stringify({t:Date.now(),body:t}))}catch(e){}});return r});
+   if(hit&&hit.body&&Date.now()-hit.t<10*60000){refresh().catch(()=>{});return Promise.resolve(new Response(hit.body,{status:200,headers:{'Content-Type':'application/json'}}))}
+   return refresh();
+  };
+ }catch(e){}
+
+ // v0.8 preview policy (replaces the 0.7 stall guard): the guide preview
+ // decodes ONLY while the user dwells on a channel (no D-pad input for
+ // 1.2s). Any navigation pauses it instantly, so guide rendering never
+ // competes with video decode - the "plays a few seconds then freezes"
+ // symptom. A dwelling preview whose clock stops advancing >2.5s while
+ // playing is paused and hidden until the next channel change (a full
+ // readyState buffer can mask a starved decoder, so watch currentTime).
+ let prevChan='',prevT=-1,prevAdvanceAt=0;
  setInterval(function(){
-  if(watching()){stallSince=0;return}
+  if(watching())return;
   const p=document.querySelector('#preview');
-  if(!p){stallSince=0;return}
+  if(!p)return;
   const chan=p.dataset.channelId||'';
-  if(chan!==stallChan){stallChan=chan;stallSince=0;p.style.display=''}
-  if(p.paused)return;
-  if(p.readyState<3){
-   if(!stallSince)stallSince=Date.now();
-   else if(Date.now()-stallSince>8000){p.pause();p.style.display='none';stallSince=0}
-  }else stallSince=0;
+  if(chan!==prevChan){prevChan=chan;prevT=-1;prevAdvanceAt=Date.now();delete p.dataset.crtRetried;p.style.display=''}
+  const dwelling=Date.now()-lastInteraction>1200;
+  if(!dwelling){if(!p.paused)p.pause();return}
+  if(p.paused){p.play().catch(()=>{});prevAdvanceAt=Date.now();return}
+  if(prevT<0||Math.abs(p.currentTime-prevT)>0.05){prevT=p.currentTime;prevAdvanceAt=Date.now()}
+  else if(Date.now()-prevAdvanceAt>2500){
+   // Frozen clock: one reload retry to re-acquire the decoder (the leak
+   // after fullscreen exit), then give up until the channel changes.
+   if(!p.dataset.crtRetried){p.dataset.crtRetried='1';try{p.load()}catch(e){}p.play().catch(()=>{});prevAdvanceAt=Date.now()}
+   else{p.pause();p.style.display='none'}
+  }
  },1000);
 
  // ---- tester debug overlay (0.7): one line, updates 2x/s ----------------
@@ -147,19 +200,23 @@
  let lastSrc='',lastErrAt=0;
  setInterval(function(){
   let v=(!watching()&&document.querySelector('#preview'))||document.querySelector('#video')||document.querySelector('.hero-screen video')||document.querySelector('video');
-  if(!v){dbg.textContent='CRT 0.7 debug: no <video> element on page';dbg.style.display=(dbgPinned||Date.now()<dbgLaunchUntil)?'':'none';return}
+  if(!v){dbg.textContent='CRT 0.8 debug: no <video> element on page';dbg.style.display=(dbgPinned||Date.now()<dbgLaunchUntil)?'':'none';return}
   let err=v.error?(' err='+ (ERRN[v.error.code]||v.error.code)):'';
   if(err&&Date.now()-lastErrAt>1000){lastErrAt=Date.now();console.log('CRT-DEBUG media error',v.error.code,v.error.message||'')}
   let src=v.currentSrc||v.src||'';if(src!==lastSrc){lastSrc=src;console.log('CRT-DEBUG src',src)}
-  let buf='-';try{if(v.buffered.length)buf=v.buffered.end(v.buffered.length-1).toFixed(1)}catch(e){}
-  dbg.textContent='CRT 0.7 | rs='+v.readyState+' '+(RSN[v.readyState]||'')+' | ns='+v.networkState+' '+(NSN[v.networkState]||'')+
-   ' | t='+v.currentTime.toFixed(1)+'/'+((v.duration&&isFinite(v.duration))?v.duration.toFixed(0):'?')+
-   ' | buf='+buf+'s'+(v.paused?' | paused':' | playing')+' | key->paint '+keyPaintMs+'ms'+err;
   const now=Date.now();
-  if(v.readyState<3){if(!dbgStallAt)dbgStallAt=now}else dbgStallAt=0;
+  // A paused preview is the normal dwelling/navigation state in 0.8, not a
+  // stall - only an actively playing video counts toward the stall timer.
+  if(v.readyState<3&&!v.paused){if(!dbgStallAt)dbgStallAt=now}else dbgStallAt=0;
   const bad=!!err||(dbgStallAt&&now-dbgStallAt>8000);
   if(bad)dbgLastBadAt=now;
-  dbg.style.display=(dbgPinned||now<dbgLaunchUntil||bad||now-dbgLastBadAt<5000)?'':'none';
+  const vis=dbgPinned||now<dbgLaunchUntil||bad||now-dbgLastBadAt<5000;
+  dbg.style.display=vis?'':'none';
+  if(!vis)return; // skip the text build while hidden: less main-thread work
+  let buf='-';try{if(v.buffered.length)buf=v.buffered.end(v.buffered.length-1).toFixed(1)}catch(e){}
+  dbg.textContent='CRT 0.8 | rs='+v.readyState+' '+(RSN[v.readyState]||'')+' | ns='+v.networkState+' '+(NSN[v.networkState]||'')+
+   ' | t='+v.currentTime.toFixed(1)+'/'+((v.duration&&isFinite(v.duration))?v.duration.toFixed(0):'?')+
+   ' | buf='+buf+'s'+(v.paused?' | paused':' | playing')+' | key->paint '+keyPaintMs+'ms'+err;
  },500);
 
  // Hosted updates, not APK self-installation. Public endpoints only, hourly.
@@ -188,7 +245,8 @@
  }
  window.crtCheckUpdates=checkUpdates;
  window.crtUpdateStatus='checking';
- checkUpdates();setInterval(checkUpdates,60*60000);setInterval(applyPendingUpdate,15000);
+ // v0.8: no background work while the video starts - first checks run 60s in.
+ setTimeout(checkUpdates,60000);setInterval(checkUpdates,60*60000);setTimeout(()=>setInterval(applyPendingUpdate,15000),60000);
 
  // APK self-update: at load and hourly, check the latest crt-tv-get release
  // (public API, no cookie). A newer tag shows an on-screen prompt; Install
@@ -222,5 +280,5 @@
   }catch(e){}
  }
  window.crtCheckApkUpdate=checkApkUpdate;
- checkApkUpdate();setInterval(checkApkUpdate,60*60000);
+ setTimeout(checkApkUpdate,90000);setInterval(checkApkUpdate,60*60000);
 })();
