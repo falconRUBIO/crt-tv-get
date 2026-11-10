@@ -22,6 +22,7 @@
  function buttons(){return [...document.querySelectorAll('#player button')].filter(b=>!b.disabled&&b.getClientRects().length&&getComputedStyle(b).visibility!=='hidden')}
  let lastInteraction=Date.now();
  let lastKeyAt=0,keyPaintMs=0;
+ const whatsonOpen=()=>!!document.querySelector('#whatson.on');
 
  // D-pad keys now arrive as native TRUSTED keydown events straight from the
  // WebView: zero bridge latency, single handling point. Menus/guide pass
@@ -39,6 +40,7 @@
  document.addEventListener('keydown',function(e){
   lastInteraction=Date.now();lastKeyAt=performance.now();
   requestAnimationFrame(function(){requestAnimationFrame(function(){keyPaintMs=Math.round(performance.now()-lastKeyAt)})});
+  if(whatsonOpen())return; // what's-on cards are native buttons: let the site/remote work untouched
   if(!watching()){
    if(NAV[e.key]&&e.isTrusted){
     const now=Date.now();
@@ -72,8 +74,20 @@
   if(k==='Menu'){if(watching()){reveal();(buttons()[0]||document.querySelector('#ctl-play'))?.focus()}return}
   key(k);
  };
- window.crtBack=function(){let player=watching();if(player?.classList.contains('show-more')){document.querySelector('#ctl-more').click();return true}if(document.fullscreenElement){document.exitFullscreen();return true}if(watching()){document.querySelector('#ctl-guide').click();return true}return false};
+ window.crtBack=function(){if(whatsonOpen()){document.querySelector('#ctl-whatson').click();return true}let player=watching();if(player?.classList.contains('show-more')){document.querySelector('#ctl-more').click();return true}if(document.fullscreenElement){document.exitFullscreen();return true}if(watching()){document.querySelector('#ctl-guide').click();return true}return false};
  window.crtSuspend=function(){document.querySelectorAll('video').forEach(v=>v.pause())};
+
+ // Auto-open the TV-friendly mode on launch: start playback, then open the
+ // what's-on channel browser (the path the tester found usable). Once per load.
+ let autoOpened=false;
+ const autoOpen=setInterval(function(){
+  if(autoOpened){clearInterval(autoOpen);return}
+  if(!document.querySelector('#app'))return;
+  if(!watching()){document.querySelector('#hero-screen')?.click();return}
+  const wo=document.querySelector('#ctl-whatson');
+  if(wo){autoOpened=true;clearInterval(autoOpen);wo.click()}
+ },800);
+ setTimeout(function(){clearInterval(autoOpen)},20000);
 
  // ---- tester debug overlay (0.6): one line, updates 2x/s ----------------
  // Tells the next test WHICH failure it is:
