@@ -1,11 +1,19 @@
 package tv.crt.test;
 
 import android.app.Activity;
+import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -39,6 +47,25 @@ public class MainActivity extends Activity {
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
     private WebChromeClient chromeClient;
+    private long updateDownloadId = -1;
+
+    private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
+            if (id != updateDownloadId) return;
+            DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            Uri uri = dm != null ? dm.getUriForDownloadedFile(id) : null;
+            if (uri == null) return;
+            Intent install = new Intent(Intent.ACTION_VIEW);
+            install.setDataAndType(uri, "application/vnd.android.package-archive");
+            install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(install);
+            } catch (Exception ignored) {
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -87,6 +114,21 @@ public class MainActivity extends Activity {
         };
         webView.setWebChromeClient(chromeClient);
 
+        webView.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void installUpdate(String url) {
+                startUpdateDownload(url);
+            }
+
+            @JavascriptInterface
+            public String appVersion() {
+                return "0.6";
+            }
+        }, "CrtNative");
+
+        registerReceiver(updateReceiver,
+                new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
@@ -116,6 +158,22 @@ public class MainActivity extends Activity {
             while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
             in.close();
             webView.evaluateJavascript(out.toString("UTF-8"), null);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void startUpdateDownload(String url) {
+        try {
+            DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            DownloadManager.Request req = new DownloadManager.Request(Uri.parse(url));
+            req.setTitle("CRT TV update");
+            req.setDescription("Downloading the new CRT TV version");
+            req.setNotificationVisibility(
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            req.setDestinationInExternalFilesDir(this,
+                    Environment.DIRECTORY_DOWNLOADS, "CRT-TV-update.apk");
+            req.setMimeType("application/vnd.android.package-archive");
+            updateDownloadId = dm.enqueue(req);
         } catch (Exception ignored) {
         }
     }
@@ -180,6 +238,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try {
+            unregisterReceiver(updateReceiver);
+        } catch (Exception ignored) {
+        }
         if (webView != null) webView.destroy();
         super.onDestroy();
     }
