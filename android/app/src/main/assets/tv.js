@@ -1,7 +1,7 @@
 (function(){
  if(document.getElementById("crt-access-gate")||!document.getElementById("app"))return;
  if(window.crtTVInstalled)return;window.crtTVInstalled=true;
- window.crtTvVersion='0.6';
+ window.crtTvVersion='0.7';
  const style=document.createElement('style');style.textContent=`
  .desktop-player .preview-actions,#ctl-theater,#ctl-full{display:none!important}
  .desktop-player .osd-rows .tbtn:focus{outline:3px solid #f7e8cd;outline-offset:2px;background:#534b3b}
@@ -13,6 +13,11 @@
  #video,.hero-screen video{will-change:transform!important}
  .hero-screen{overflow:visible!important;border-radius:0!important}
  .hero-screen::after{display:none!important}
+ /* TV light mode: the guide ships ~9k nodes / 2k tiles; Fire Stick WebView
+    stalls on transitions and offscreen-row rendering. */
+ *,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}
+ .epg-row,.tile,.sports-row,.wo-card,.hero-screen,#player,.chan-cell{box-shadow:none!important;text-shadow:none!important;backdrop-filter:none!important}
+ .epg-row{content-visibility:auto!important;contain-intrinsic-size:auto 112px!important}
  /* tester debug line: distinguishes loading/seek stalls from compositing bugs */
  #crt-debug-line{position:fixed;left:8px;bottom:8px;z-index:2147483647;background:rgba(0,0,0,.82);color:#9fe870;font:14px/1.35 monospace;padding:6px 10px;border-radius:4px;max-width:94vw;white-space:pre-wrap;pointer-events:none}
  `;document.head.appendChild(style);
@@ -99,7 +104,25 @@
  },800);
  setTimeout(function(){clearInterval(autoOpen)},20000);
 
- // ---- tester debug overlay (0.6): one line, updates 2x/s ----------------
+ // Preview-stall guard: a stalled preview video pegs the Fire Stick main
+ // thread (that is the guide lag). While browsing (not watching), if the
+ // preview sits below HAVE_CURRENT_DATA for >8s, pause it; each channel
+ // change gets a fresh 8s to prove it can play.
+ let stallSince=0,stallChan='';
+ setInterval(function(){
+  if(watching()){stallSince=0;return}
+  const p=document.querySelector('#preview');
+  if(!p){stallSince=0;return}
+  const chan=p.dataset.channelId||'';
+  if(chan!==stallChan){stallChan=chan;stallSince=0;p.style.display=''}
+  if(p.paused)return;
+  if(p.readyState<3){
+   if(!stallSince)stallSince=Date.now();
+   else if(Date.now()-stallSince>8000){p.pause();p.style.display='none';stallSince=0}
+  }else stallSince=0;
+ },1000);
+
+ // ---- tester debug overlay (0.7): one line, updates 2x/s ----------------
  // Tells the next test WHICH failure it is:
  //  - rs<3 / ns=LOADING for a long time  -> loading/bandwidth/seek stall
  //    ("Tuning..." with no picture is this, NOT the compositing bug)
@@ -109,16 +132,16 @@
  const RSN=['HAVE_NOTHING','HAVE_METADATA','HAVE_CURRENT_DATA','HAVE_FUTURE_DATA','HAVE_ENOUGH_DATA'];
  const NSN=['EMPTY','IDLE','LOADING','NO_SOURCE'];
  const ERRN={1:'ABORTED',2:'NETWORK',3:'DECODE',4:'SRC_NOT_SUPPORTED'};
- const dbg=document.createElement('div');dbg.id='crt-debug-line';dbg.textContent='CRT 0.6 debug: waiting for video...';document.body.appendChild(dbg);
+ const dbg=document.createElement('div');dbg.id='crt-debug-line';dbg.textContent='CRT 0.7 debug: waiting for video...';document.body.appendChild(dbg);
  let lastSrc='',lastErrAt=0;
  setInterval(function(){
-  let v=document.querySelector('#video')||document.querySelector('.hero-screen video')||document.querySelector('video');
-  if(!v){dbg.textContent='CRT 0.6 debug: no <video> element on page';return}
+  let v=(!watching()&&document.querySelector('#preview'))||document.querySelector('#video')||document.querySelector('.hero-screen video')||document.querySelector('video');
+  if(!v){dbg.textContent='CRT 0.7 debug: no <video> element on page';return}
   let err=v.error?(' err='+ (ERRN[v.error.code]||v.error.code)):'';
   if(err&&Date.now()-lastErrAt>1000){lastErrAt=Date.now();console.log('CRT-DEBUG media error',v.error.code,v.error.message||'')}
   let src=v.currentSrc||v.src||'';if(src!==lastSrc){lastSrc=src;console.log('CRT-DEBUG src',src)}
   let buf='-';try{if(v.buffered.length)buf=v.buffered.end(v.buffered.length-1).toFixed(1)}catch(e){}
-  dbg.textContent='CRT 0.6 | rs='+v.readyState+' '+(RSN[v.readyState]||'')+' | ns='+v.networkState+' '+(NSN[v.networkState]||'')+
+  dbg.textContent='CRT 0.7 | rs='+v.readyState+' '+(RSN[v.readyState]||'')+' | ns='+v.networkState+' '+(NSN[v.networkState]||'')+
    ' | t='+v.currentTime.toFixed(1)+'/'+((v.duration&&isFinite(v.duration))?v.duration.toFixed(0):'?')+
    ' | buf='+buf+'s'+(v.paused?' | paused':' | playing')+' | key->paint '+keyPaintMs+'ms'+err;
  },500);
