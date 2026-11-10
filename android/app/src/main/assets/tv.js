@@ -36,7 +36,7 @@
  // at most ONE repeat of the latest direction once the thread settles.
  const NAV={ArrowUp:1,ArrowDown:1,ArrowLeft:1,ArrowRight:1};
  let busyUntil=0,pendingNav=null,pendingTimer=0;
- function settle(){pendingTimer=0;if(pendingNav){const k2=pendingNav;pendingNav=null;key(k2)}}
+ function settle(){pendingTimer=0;if(pendingNav){const k2=pendingNav;pendingNav=null;(document.activeElement||document).dispatchEvent(new KeyboardEvent('keydown',{key:k2,bubbles:true,cancelable:true}))}}
  document.addEventListener('keydown',function(e){
   lastInteraction=Date.now();lastKeyAt=performance.now();
   requestAnimationFrame(function(){requestAnimationFrame(function(){keyPaintMs=Math.round(performance.now()-lastKeyAt)})});
@@ -71,10 +71,20 @@
  window.crtRemote=function(k){lastInteraction=Date.now();
   if(k==='MediaPlayPause'){if(watching())document.querySelector('#ctl-play').click();else document.querySelector('#hero-screen')?.click();return}
   if(k==='MediaRewind'||k==='MediaFastForward'){if(watching())key(k==='MediaRewind'?'ArrowLeft':'ArrowRight');return}
-  if(k==='Menu'){if(watching()){reveal();(buttons()[0]||document.querySelector('#ctl-play'))?.focus()}return}
+  if(k==='Menu'){
+   if(watching()){reveal();(buttons()[0]||document.querySelector('#ctl-play'))?.focus();return}
+   const inSports=!!(document.activeElement&&document.activeElement.closest&&document.activeElement.closest('.sports-section, #sports-player'));
+   if(inSports){document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));return}
+   const row=document.querySelector('.sports-row:not(:disabled)')||document.querySelector('.sports-row');
+   if(row){row.focus();row.scrollIntoView({block:'center'})}
+   return;
+  }
   key(k);
  };
- window.crtBack=function(){if(whatsonOpen()){document.querySelector('#ctl-whatson').click();return true}let player=watching();if(player?.classList.contains('show-more')){document.querySelector('#ctl-more').click();return true}if(document.fullscreenElement){document.exitFullscreen();return true}if(watching()){document.querySelector('#ctl-guide').click();return true}return false};
+ window.crtBack=function(){
+  const ae=document.activeElement;
+  if(ae&&ae.closest&&ae.closest('.sports-section, #sports-player')){ae.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));return true}
+  if(whatsonOpen()){document.querySelector('#ctl-whatson').click();return true}let player=watching();if(player?.classList.contains('show-more')){document.querySelector('#ctl-more').click();return true}if(document.fullscreenElement){document.exitFullscreen();return true}if(watching()){document.querySelector('#ctl-guide').click();return true}return false};
  window.crtSuspend=function(){document.querySelectorAll('video').forEach(v=>v.pause())};
 
  // Auto-open the TV-friendly mode on launch: start playback, then open the
