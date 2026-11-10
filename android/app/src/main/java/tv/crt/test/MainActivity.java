@@ -40,7 +40,7 @@ public class MainActivity extends Activity {
     private static final String HOME_URL = "https://crt-tv-4ym.pages.dev/";
     private static final String UA = "Mozilla/5.0 (X11; Linux x86_64) "
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.0 "
-            + "Safari/537.36 CRTTV/0.6";
+            + "Safari/537.36 CRTTV/0.7";
 
     private WebView webView;
     private FrameLayout customContainer;
@@ -122,7 +122,7 @@ public class MainActivity extends Activity {
 
             @JavascriptInterface
             public String appVersion() {
-                return "0.6";
+                return "0.7";
             }
         }, "CrtNative");
 
