@@ -150,4 +150,38 @@
  window.crtCheckUpdates=checkUpdates;
  window.crtUpdateStatus='checking';
  checkUpdates();setInterval(checkUpdates,60*60000);setInterval(applyPendingUpdate,15000);
+
+ // APK self-update: at load and hourly, check the latest crt-tv-get release
+ // (public API, no cookie). A newer tag shows an on-screen prompt; Install
+ // hands the asset URL to the native bridge, which downloads via
+ // DownloadManager and fires the Fire OS system installer (the tester
+ // confirms the install prompt; first time, Fire OS asks to allow
+ // "install unknown apps" for CRT TV once).
+ function cmpVer(a,b){const p=String(a).split('.'),q=String(b).split('.');for(let i=0;i<3;i++){const x=parseInt(p[i]||'0',10),y=parseInt(q[i]||'0',10);if(x!==y)return x>y?1:-1}return 0}
+ function showUpdatePrompt(ver,url){
+  if(document.getElementById('crt-update-prompt'))return;
+  const d=document.createElement('div');
+  d.id='crt-update-prompt';
+  d.style.cssText='position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:2147483647;background:#25231F;color:#F7E8CD;padding:14px 18px;border-radius:8px;border:2px solid #B89037;font:14px/1.4 sans-serif;max-width:80vw';
+  const b=document.createElement('button');b.textContent='Install update v'+ver;b.style.cssText='margin-left:10px;padding:8px 14px;font:600 14px sans-serif;cursor:pointer';
+  const l=document.createElement('button');l.textContent='Later';l.style.cssText='margin-left:8px;padding:8px 14px;font:14px sans-serif;cursor:pointer';
+  d.append('CRT TV v'+ver+' is available.',b,l);
+  b.onclick=()=>{window.CrtNative.installUpdate(url);d.remove()};
+  l.onclick=()=>d.remove();
+  document.body.appendChild(d);b.focus();
+ }
+ async function checkApkUpdate(){
+  if(!(window.CrtNative&&window.CrtNative.installUpdate))return;
+  try{
+   const r=await fetch('https://api.github.com/repos/falconRUBIO/crt-tv-get/releases/latest',{cache:'no-store'});
+   if(!r.ok)return;
+   const rel=await r.json();
+   const latest=String(rel.tag_name||'').replace(/^v/,'');
+   const apk=(rel.assets||[]).find(a=>/\.apk$/i.test(a.name||''));
+   if(!latest||!apk||!apk.browser_download_url)return;
+   if(cmpVer(latest,window.crtTvVersion)>0)showUpdatePrompt(latest,apk.browser_download_url);
+  }catch(e){}
+ }
+ window.crtCheckApkUpdate=checkApkUpdate;
+ checkApkUpdate();setInterval(checkApkUpdate,60*60000);
 })();
